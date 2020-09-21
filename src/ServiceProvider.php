@@ -220,9 +220,13 @@ class ServiceProvider extends \Illuminate\Support\ServiceProvider
                     }
                     case 'in': {
                         $this->whereIn($filterData[0], $filterValue, $boolean);
+
+                        continue;
                     }
                     case 'not_in': {
                         $this->whereIn($filterData[0], $filterValue, $boolean, true);
+
+                        continue;
                     }
                 }
             }
