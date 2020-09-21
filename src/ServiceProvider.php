@@ -24,7 +24,7 @@ class ServiceProvider extends \Illuminate\Support\ServiceProvider
      */
     public function boot()
     {
-        $filterRelations = function ($relationKeys, $includedKeys, $group) {
+        Builder::macro('allowedRelations', function (array $relationKeys, $group = null, $includedKeys = null) {
             foreach ($relationKeys as $relationKey => $relationClosure) {
                 if (!is_integer($relationKey)) {
                     continue;
@@ -37,8 +37,8 @@ class ServiceProvider extends \Illuminate\Support\ServiceProvider
                 };
             }
 
-            if (!isset($includedKeys) && request()->has('include')) {
-                $includedKeys = request()->input('include') ?? [];
+            if (!isset($includedKeys) && request()->has('fields')) {
+                $includedKeys = request()->input('fields') ?? [];
             }
 
             if (isset($includedKeys)) {
@@ -60,31 +60,22 @@ class ServiceProvider extends \Illuminate\Support\ServiceProvider
                 ksort($relationKeys);
             }
 
-            return $relationKeys;
-        };
-
-        Builder::macro('allowedRelations', function (array $relationKeys, $group = null, $includedKeys = null) use ($filterRelations) {
-            $relationKeys = $filterRelations($relationKeys, $includedKeys, $group);
             $this->with($relationKeys);
 
             return $this;
         });
 
-        $filterFields = function ($fields, $includedKeys, $group) {
-            $fields = is_array($fields) ? $fields : [$fields];
+        Builder::macro('allowedColumns', function (array $selectables, $group = null, $includedKeys = null) {
+            $selectables = is_array($selectables) ? $selectables : [$selectables];
 
-            foreach ($fields as $fieldKey => $fieldColumn) {
-                if (!is_integer($fieldKey)) {
+            foreach ($selectables as $selectableKey => $selectable) {
+                if (!is_integer($selectableKey)) {
                     continue;
                 }
 
-                unset($fields[$fieldKey]);
-                preg_match('/[a-z0-9_]+$/', $fieldColumn, $fieldColumnMatches);
-                $fields[$fieldColumnMatches[0]] = $fieldColumn;
-            }
-
-            foreach ($fields as $fieldKey => $fieldColumn) {
-                $fields[$fieldKey] = $fieldColumn;
+                unset($selectables[$selectableKey]);
+                preg_match('/[a-z0-9_]+$/', $selectable, $selectableMatches);
+                $selectables[$selectableMatches[0]] = $selectable;
             }
 
             if (!isset($includedKeys) && request()->has('fields')) {
@@ -98,31 +89,25 @@ class ServiceProvider extends \Illuminate\Support\ServiceProvider
                     $includedKeys = [];
                 }
 
-                $fields = array_filter($fields, function ($fieldColumn, $fieldKey) use ($includedKeys, $group) {
-                    return in_array(($group ? $group . '.' : '') . $fieldKey, $includedKeys);
+                $selectables = array_filter($selectables, function ($selectable, $selectableKey) use ($includedKeys, $group) {
+                    return in_array(($group ? $group . '.' : '') . $selectableKey, $includedKeys);
                 }, ARRAY_FILTER_USE_BOTH);
             }
 
-            return $fields;
-        };
-
-        Builder::macro('allowedFields', function (array $fields, $group = null, $includedKeys = null) use ($filterFields) {
-            $fields = $filterFields($fields, $includedKeys, $group);
-
-            $columnFields = array_filter($fields, function ($fieldColumn) {
-                return !Str::contains($fieldColumn, ' ');
+            $columns = array_filter($selectables, function ($selectable) {
+                return !Str::contains($selectable, ' ');
             });
 
-            if (count($columnFields) > 0) {
-                $this->addSelect(array_values($columnFields));
+            if (count($columns) > 0) {
+                $this->addSelect(array_values($columns));
             }
 
-            $rawFields = array_filter($fields, function ($fieldColumn) {
-                return Str::contains($fieldColumn, ' ');
+            $rawExpressions = array_filter($selectables, function ($selectable) {
+                return Str::contains($selectable, ' ');
             });
 
-            foreach ($rawFields as $rawFieldExpression) {
-                $this->selectRaw($rawFieldExpression);
+            foreach ($rawExpressions as $rawExpression) {
+                $this->selectRaw($rawExpression);
             }
 
             return $this;
@@ -254,18 +239,120 @@ class ServiceProvider extends \Illuminate\Support\ServiceProvider
             }
         };
 
-        Builder::macro('allowedFilters', function (array $filterKeys, $group = null, $includedKeys = null) use ($filterFilters, $applyFilters) {
-            $filterKeys = $filterFilters($filterKeys, $includedKeys, $group);
-            $applyFilters->call($this, $filterKeys, $includedKeys, $group, 'and');
+        Builder::macro('allowedFilters', function (array $filterKeys, $group = null, $includedKeys = null, $boolean = 'and') {
+            if (is_string($filterKeys)) {
+                $filterKeys = [$filterKeys];
+            }
+
+            foreach ($filterKeys as $filterKey => $filterData) {
+                if (is_string($filterData)) {
+                    $filterData = explode('|', $filterData);
+                }
+
+                if (count($filterData) === 1) {
+                    $filterData = [$filterData[0], 'exact'];
+                }
+
+                $filterKeys[$filterKey] = $filterData;
+            }
+
+            foreach ($filterKeys as $filterKey => $filterData) {
+                if (!is_integer($filterKey)) {
+                    continue;
+                }
+
+                unset($filterKeys[$filterKey]);
+                preg_match('/[a-z0-9_]+$/', $filterData[0], $filterDataMatches);
+                $filterKeys[$filterDataMatches[0]] = $filterData;
+            }
+
+            if (!isset($includedKeys) && request()->has('filter')) {
+                $includedKeys = request()->input('filter') ?? [];
+            }
+
+            if (!is_array($includedKeys)) {
+                $includedKeys = [];
+            }
+
+            $filterKeys = array_filter($filterKeys, function ($filterData, $filterKey) use ($includedKeys, $group) {
+                if (isset($filterData[2])) {
+                    return true;
+                }
+
+                return array_filter($includedKeys, function ($includedKey) use ($filterKey, $group) {
+                    return ($group ? $group . '.' : '') . $filterKey === $includedKey;
+                }, ARRAY_FILTER_USE_KEY);
+            }, ARRAY_FILTER_USE_BOTH);
+
+            ksort($filterKeys);
+
+            foreach ($filterKeys as $filterKey => $filterData) {
+                if (isset($includedKeys[$filterKey])) {
+                    if (in_array($filterData[1], ['in', 'not_in'])) {
+                        if (is_string($includedKeys[$filterKey])) {
+                            $includedKeys[$filterKey] = explode(',', $includedKeys[$filterKey]);
+                        }
+
+                        foreach ($includedKeys[$filterKey] as $includedFilterValue) {
+                            if (!is_string($includedFilterValue)) {
+                                abort(400, 'The `' . $filterData[1] . '` filter contains unallowed array in array');
+                            }
+                        }
+                    } else {
+                        if (is_array($includedKeys[$filterKey])) {
+                            abort(400, 'The `' . $filterData[1] . '` filter should be a string');
+                        }
+                    }
+                }
+            }
+
+            foreach ($filterKeys as $filterKey => $filterData) {
+                $filterValue = $includedKeys[($group ? $group . '.' : '') . $filterKey] ?? $filterData[2] ?? null;
+
+                switch ($filterData[1]) {
+                    case 'exact': {
+                        $this->where($filterData[0], '=', $filterValue, $boolean);
+
+                        continue;
+                    }
+                    case 'like': {
+                        $this->where($filterData[0], 'like', '%' . $filterValue . '%', $boolean);
+
+                        continue;
+                    }
+                    case 'like_splitted': {
+                        $this->where(function ($where) use ($filterData, $filterValue, $boolean) {
+                            foreach (preg_split('/\s+/', $filterValue) as $filterValuePart) {
+                                $where->where($filterData[0], 'like', '%' . $filterValuePart . '%', $boolean);
+                            }
+                        });
+
+                        continue;
+                    }
+                    case 'like_start': {
+                        $this->where($filterData[0], 'like', '%' . $filterValue, $boolean);
+
+                        continue;
+                    }
+                    case 'like_end': {
+                        $this->where($filterData[0], 'like', $filterValue . '%', $boolean);
+
+                        continue;
+                    }
+                    case 'in': {
+                        $this->whereIn($filterData[0], $filterValue, $boolean);
+                    }
+                    case 'not_in': {
+                        $this->whereIn($filterData[0], $filterValue, $boolean, true);
+                    }
+                }
+            }
 
             return $this;
         });
 
-        Builder::macro('orAllowedFilters', function (array $filterKeys, $group = null, $includedKeys = null) use ($filterFilters, $applyFilters) {
-            $filterKeys = $filterFilters($filterKeys, $includedKeys, $group);
-            $applyFilters->call($this, $filterKeys, $includedKeys, 'or');
-
-            return $this;
+        Builder::macro('orAllowedFilters', function (array $filterKeys, $group = null, $includedKeys = null) {
+            return $this->allowedFilters($filterKeys, $group, $includedKeys, 'or');
         });
 
         Builder::macro('allowedOrders', function (array $orderKeys, $defaultOrderKeys = null, $group = null, $includedKeys = null) {
