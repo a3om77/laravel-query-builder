@@ -1,0 +1,26 @@
+{
+    "name": "a3om77/laravel-query-builder",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Daniel Runkov",
+            "email": "a3om77@gmail.com"
+        }
+    ],
+    "minimum-stability": "dev",
+    "autoload": {
+        "psr-4": {
+            "A3om77\\QueryBuilder\\": "src/"
+        }
+    },
+    "require": {},
+    "extra": {
+        "laravel": {
+            "providers": [
+                "A3om77\\QueryBuilder\\ServiceProvider"
+            ],
+            "aliases": {}
+        }
+    }
+}
