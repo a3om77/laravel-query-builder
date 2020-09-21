@@ -47,7 +47,7 @@ class ServiceProvider extends \Illuminate\Support\ServiceProvider
                 $includedKeys = [];
             }
 
-            $relationKeys = array_filter($relationKeys, function ($relationKey) use ($includedKeys, $group) {
+            $includedRelationKeys = array_filter($relationKeys, function ($relationKey) use ($includedKeys, $group) {
                 return array_filter($includedKeys, function ($includedKey) use ($relationKey, $group) {
                     return (
                         ($group ? $group . '.' : '') . $relationKey === $includedKey ||
@@ -56,12 +56,12 @@ class ServiceProvider extends \Illuminate\Support\ServiceProvider
                 });
             }, ARRAY_FILTER_USE_KEY);
 
-            if (count($relationKeys) === 0) {
-                return $this;
+            if (!$includedRelationKeys) {
+                $includedRelationKeys = $relationKeys;
             }
 
-            ksort($relationKeys);
-            $this->with($relationKeys);
+            ksort($includedRelationKeys);
+            $this->with($includedRelationKeys);
 
             return $this;
         });
