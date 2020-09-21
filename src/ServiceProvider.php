@@ -41,25 +41,26 @@ class ServiceProvider extends \Illuminate\Support\ServiceProvider
                 $includedKeys = request()->input('fields') ?? [];
             }
 
-            if (isset($includedKeys)) {
-                if (is_string($includedKeys)) {
-                    $includedKeys = preg_split('/[^a-z0-9_.]/i', $includedKeys);
-                } elseif (!is_array($includedKeys)) {
-                    $includedKeys = [];
-                }
-
-                $relationKeys = array_filter($relationKeys, function ($relationKey) use ($includedKeys, $group) {
-                    return array_filter($includedKeys, function ($includedKey) use ($relationKey, $group) {
-                        return (
-                            ($group ? $group . '.' : '') . $relationKey === $includedKey ||
-                            Str::startsWith($includedKey, ($group ? $group . '.' : '') . $relationKey . '.')
-                        );
-                    });
-                }, ARRAY_FILTER_USE_KEY);
-
-                ksort($relationKeys);
+            if (is_string($includedKeys)) {
+                $includedKeys = preg_split('/[^a-z0-9_.]/i', $includedKeys);
+            } elseif (!is_array($includedKeys)) {
+                $includedKeys = [];
             }
 
+            $relationKeys = array_filter($relationKeys, function ($relationKey) use ($includedKeys, $group) {
+                return array_filter($includedKeys, function ($includedKey) use ($relationKey, $group) {
+                    return (
+                        ($group ? $group . '.' : '') . $relationKey === $includedKey ||
+                        Str::startsWith($includedKey, ($group ? $group . '.' : '') . $relationKey . '.')
+                    );
+                });
+            }, ARRAY_FILTER_USE_KEY);
+
+            if (count($relationKeys) === 0) {
+                return $this;
+            }
+
+            ksort($relationKeys);
             $this->with($relationKeys);
 
             return $this;
@@ -79,19 +80,21 @@ class ServiceProvider extends \Illuminate\Support\ServiceProvider
             }
 
             if (!isset($includedKeys) && request()->has('fields')) {
-                $includedKeys = request()->input('fields') ?? [];
+                $includedKeys = request()->input('fields', []);
             }
 
-            if (isset($includedKeys)) {
-                if (is_string($includedKeys)) {
-                    $includedKeys = preg_split('/[^a-z0-9_.]/i', $includedKeys);
-                } elseif (!is_array($includedKeys)) {
-                    $includedKeys = [];
-                }
+            if (is_string($includedKeys)) {
+                $includedKeys = preg_split('/[^a-z0-9_.]/i', $includedKeys);
+            } elseif (!is_array($includedKeys)) {
+                $includedKeys = [];
+            }
 
-                $selectables = array_filter($selectables, function ($selectable, $selectableKey) use ($includedKeys, $group) {
-                    return in_array(($group ? $group . '.' : '') . $selectableKey, $includedKeys);
-                }, ARRAY_FILTER_USE_BOTH);
+            $selectables = array_filter($selectables, function ($selectable, $selectableKey) use ($includedKeys, $group) {
+                return in_array(($group ? $group . '.' : '') . $selectableKey, $includedKeys);
+            }, ARRAY_FILTER_USE_BOTH);
+
+            if (count($selectables) === 0) {
+                return $this;
             }
 
             $columns = array_filter($selectables, function ($selectable) {
@@ -113,131 +116,7 @@ class ServiceProvider extends \Illuminate\Support\ServiceProvider
             return $this;
         });
 
-        // Builder::macro('allowedSelectRaw', function ($field, $bindings = [], $group = null, $includedKeys = null) use ($filterFields) {
-        //     $fields = $filterFields([$field], $includedKeys, null, $group);
-
-        //     if (count($fields) > 0) {
-        //         $this->selectRaw($field, $bindings);
-        //     }
-
-        //     return $this;
-        // });
-
         // TODO: appends
-
-        $filterFilters = function ($filterKeys, &$includedKeys, $group) {
-            if (is_string($filterKeys)) {
-                $filterKeys = [$filterKeys];
-            }
-
-            foreach ($filterKeys as $filterKey => $filterData) {
-                if (is_string($filterData)) {
-                    $filterData = explode('|', $filterData);
-                }
-
-                if (count($filterData) === 1) {
-                    $filterData = [$filterData[0], 'exact'];
-                }
-
-                $filterKeys[$filterKey] = $filterData;
-            }
-
-            foreach ($filterKeys as $filterKey => $filterData) {
-                if (!is_integer($filterKey)) {
-                    continue;
-                }
-
-                unset($filterKeys[$filterKey]);
-                preg_match('/[a-z0-9_]+$/', $filterData[0], $filterDataMatches);
-                $filterKeys[$filterDataMatches[0]] = $filterData;
-            }
-
-            if (!isset($includedKeys) && request()->has('filter')) {
-                $includedKeys = request()->input('filter') ?? [];
-            }
-
-            if (!is_array($includedKeys)) {
-                $includedKeys = [];
-            }
-
-            $filterKeys = array_filter($filterKeys, function ($filterData, $filterKey) use ($includedKeys, $group) {
-                if (isset($filterData[2])) {
-                    return true;
-                }
-
-                return array_filter($includedKeys, function ($includedKey) use ($filterKey, $group) {
-                    return ($group ? $group . '.' : '') . $filterKey === $includedKey;
-                }, ARRAY_FILTER_USE_KEY);
-            }, ARRAY_FILTER_USE_BOTH);
-
-            ksort($filterKeys);
-
-            foreach ($filterKeys as $filterKey => $filterData) {
-                if (isset($includedKeys[$filterKey])) {
-                    if (in_array($filterData[1], ['in', 'not_in'])) {
-                        if (is_string($includedKeys[$filterKey])) {
-                            $includedKeys[$filterKey] = explode(',', $includedKeys[$filterKey]);
-                        }
-
-                        foreach ($includedKeys[$filterKey] as $includedFilterValue) {
-                            if (!is_string($includedFilterValue)) {
-                                abort(400, 'The `' . $filterData[1] . '` filter contains unallowed array in array');
-                            }
-                        }
-                    } else {
-                        if (is_array($includedKeys[$filterKey])) {
-                            abort(400, 'The `' . $filterData[1] . '` filter should be a string');
-                        }
-                    }
-                }
-            }
-
-            return $filterKeys;
-        };
-
-        $applyFilters = function ($filterKeys, $includedKeys, $group, $boolean) {
-            foreach ($filterKeys as $filterKey => $filterData) {
-                $filterValue = $includedKeys[($group ? $group . '.' : '') . $filterKey] ?? $filterData[2] ?? null;
-
-                switch ($filterData[1]) {
-                    case 'exact': {
-                        $this->where($filterData[0], '=', $filterValue, $boolean);
-
-                        continue;
-                    }
-                    case 'like': {
-                        $this->where($filterData[0], 'like', '%' . $filterValue . '%', $boolean);
-
-                        continue;
-                    }
-                    case 'like_splitted': {
-                        $this->where(function ($where) use ($filterData, $filterValue, $boolean) {
-                            foreach (preg_split('/\s+/', $filterValue) as $filterValuePart) {
-                                $where->where($filterData[0], 'like', '%' . $filterValuePart . '%', $boolean);
-                            }
-                        });
-
-                        continue;
-                    }
-                    case 'like_start': {
-                        $this->where($filterData[0], 'like', '%' . $filterValue, $boolean);
-
-                        continue;
-                    }
-                    case 'like_end': {
-                        $this->where($filterData[0], 'like', $filterValue . '%', $boolean);
-
-                        continue;
-                    }
-                    case 'in': {
-                        $this->whereIn($filterData[0], $filterValue, $boolean);
-                    }
-                    case 'not_in': {
-                        $this->whereIn($filterData[0], $filterValue, $boolean, true);
-                    }
-                }
-            }
-        };
 
         Builder::macro('allowedFilters', function (array $filterKeys, $group = null, $includedKeys = null, $boolean = 'and') {
             if (is_string($filterKeys)) {

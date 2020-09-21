@@ -1,0 +1,13 @@
+{
+    "private": true,
+    "scripts": {
+        "release:major": "changelog -M && git add CHANGELOG.md && git commit -m 'updated CHANGELOG.md' && npm version major && git push origin --follow-tags",
+        "release:minor": "changelog -m && git add CHANGELOG.md && git commit -m 'updated CHANGELOG.md' && npm version minor && git push origin --follow-tags",
+        "release:patch": "changelog -p && git add CHANGELOG.md && git commit -m 'updated CHANGELOG.md' && npm version patch && git push origin --follow-tags",
+        "version:first": "git tag -a 1.0.0 -m '1.0.0' && git push origin --follow-tags",
+        "update": "git fetch --all && git checkout --force origin/master"
+    },
+    "devDependencies": {
+        "generate-changelog": "^1.8.0"
+    }
+}
